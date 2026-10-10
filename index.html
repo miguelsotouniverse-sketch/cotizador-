@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- COTIZADOR · v2026-10-07k · PDF multipagina en Carta UNIFORME (una hoja se ajusta al contenido, varias van en Carta completa) · Recom de usted · Como llegar con nombre · 3 bloques Zorvix · sin API key -->
+<!-- COTIZADOR · v2026-10-09 · Busqueda GLOBAL de procedimientos (todos los modulos y categorias a la vez) · PDF Carta uniforme · Recom usted · Como llegar con nombre · 3 bloques Zorvix -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -1852,7 +1852,7 @@ let _sustituyendoA = null;                                     // COT original c
 // ── SELLO DE VERSIÓN ──
 // Se imprime al cargar. Sirve para saber AL INSTANTE qué versión está publicada
 // (evita el clásico "¿subí el archivo correcto?" / caché del navegador).
-var COTIZADOR_VERSION = 'v2026-10-07k · PDF multipágina en Carta uniforme';
+var COTIZADOR_VERSION = 'v2026-10-09 · Búsqueda global de procedimientos';
 console.log('%c[Cotizador] ' + COTIZADOR_VERSION + ' — paquetes FZ: ' +
   (typeof _construirPaquetesFZ === 'function' ? 'ACTIVOS ✓' : 'NO CARGADOS ✗'),
   'background:#2f6fb3;color:#fff;padding:3px 8px;border-radius:3px;font-weight:bold');
@@ -2112,6 +2112,7 @@ function changeModule(newModule) {
   // Reset búsqueda visible
   const srch = document.getElementById('srch');
   if (srch) { srch.value = ''; }
+  _globalSearchQ = '';
   document.getElementById('srch-clear').classList.remove('show');
   buildCatChips();
   buildProcsList();
@@ -2128,6 +2129,10 @@ function buildCatChips() {
       activeCat = btn.dataset.cat || null;
       c.querySelectorAll('.cat-chip').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
+      // Si había una búsqueda global activa, se limpia para mostrar la categoría.
+      var srch = document.getElementById('srch');
+      if (srch && srch.value) { srch.value = ''; document.getElementById('srch-clear').classList.remove('show'); }
+      _globalSearchQ = '';
       buildProcsList();
     });
   });
@@ -2187,10 +2192,12 @@ function buildProcsList() {
 }
 
 // Crea una fila para un item no-quirúrgico. Click → agrega a moduleItems[].
-// Si ya está agregado, lo quita.
-function makeModuleRow(item) {
+// Si ya está agregado, lo quita. `moduleKey` permite usarla en la búsqueda
+// global (el item se agrega a SU módulo real, no al módulo activo del dropdown).
+function makeModuleRow(item, moduleKey) {
+  const mod = moduleKey || activeModule;
   const isActive = moduleItems.some(function(it){
-    return it.module === activeModule && it.n === item.n;
+    return it.module === mod && it.n === item.n;
   });
   const row = document.createElement('div');
   row.className = 'proc-row'+(isActive?' active':'');
@@ -2201,7 +2208,7 @@ function makeModuleRow(item) {
     '<span class="proc-hon">'+fmt(item.precio)+'<small>c/u</small></span>';
   row.addEventListener('click', function() {
     const idx = moduleItems.findIndex(function(it){
-      return it.module === activeModule && it.n === item.n;
+      return it.module === mod && it.n === item.n;
     });
     if (idx >= 0) {
       moduleItems.splice(idx, 1);
@@ -2210,11 +2217,11 @@ function makeModuleRow(item) {
         n: item.n,
         cat: item.cat,
         precio: item.precio,
-        module: activeModule,
+        module: mod,
         qty: 1
       });
     }
-    buildProcsList();
+    _refreshProcList();
     renderQuote();
   });
   return row;
@@ -2272,7 +2279,7 @@ function makeProcRow(proc) {
       selected.sort(function(a,b){ return procGrandTotal(b.proc) - procGrandTotal(a.proc); });
       _recalcSeleccion();
     }
-    buildProcsList();
+    _refreshProcList();
     renderQuote();
   });
   return row;
@@ -2286,17 +2293,71 @@ function toggleCat(cid) {
   tog.classList.toggle('closed', el.style.display==='none');
 }
 
+// ── BÚSQUEDA GLOBAL DE PROCEDIMIENTOS ──
+// El buscador ya NO se limita al módulo/categoría activos: cuando hay texto,
+// busca en TODOS los módulos y categorías a la vez y agrupa los resultados por
+// módulo. Al borrar el texto, regresa a la vista normal (módulo + chip activo).
+var _globalSearchQ = '';
+
+// Orden en que se agrupan los resultados de la búsqueda global (reutiliza el
+// MODULE_LABELS ya declarado arriba para los títulos).
+var MODULE_ORDER = ['quirurgicos','inyectables','energy','fibrosis','servicios','medicamentos','anestesia'];
+
+// Datos de un módulo específico (CAT para quirúrgicos; MS_PRICES para el resto).
+function _moduleData(mod) {
+  if (mod === 'quirurgicos') return CAT || [];
+  return (window.MS_PRICES && window.MS_PRICES[mod]) || [];
+}
+
+// Re-renderiza la lista correcta: resultados de búsqueda si hay texto, o la
+// vista normal si no. Lo usan los clics de las filas para refrescar el ✓.
+function _refreshProcList() {
+  if (_globalSearchQ) renderGlobalSearch(_globalSearchQ);
+  else buildProcsList();
+}
+
+// Dibuja los resultados de búsqueda de TODOS los módulos, agrupados por módulo.
+function renderGlobalSearch(q) {
+  const container = document.getElementById('procs-list');
+  container.innerHTML = '';
+  const ql = (q || '').toLowerCase().trim();
+  let total = 0;
+  MODULE_ORDER.forEach(function(mod) {
+    const data = _moduleData(mod);
+    if (!data || !data.length) return;
+    const matches = data.filter(function(p){
+      return ((p.n || '').toLowerCase().indexOf(ql) !== -1) ||
+             ((p.cat || '').toLowerCase().indexOf(ql) !== -1);
+    });
+    if (!matches.length) return;
+    const block = document.createElement('div');
+    block.className = 'cat-block';
+    const hdr = document.createElement('div');
+    hdr.className = 'cat-hdr';
+    hdr.innerHTML = '<div class="sec-lbl" style="margin:0;border:none;padding:0;font-size:8.5px">' +
+      '<span>' + escapeHtml(MODULE_LABELS[mod] || mod) + '</span>' +
+      '<span class="lbl-count">' + matches.length + '</span></div>';
+    block.appendChild(hdr);
+    const list = document.createElement('div');
+    matches.forEach(function(proc) {
+      list.appendChild(mod === 'quirurgicos' ? makeProcRow(proc) : makeModuleRow(proc, mod));
+    });
+    block.appendChild(list);
+    container.appendChild(block);
+    total += matches.length;
+  });
+  if (!total) {
+    container.innerHTML = '<div class="no-match">Sin resultados para "' + escapeHtml(q) + '".</div>';
+  }
+  updateSelCount();
+}
+
 function filterProcs(q) {
-  q = q.toLowerCase().trim();
-  document.getElementById('srch-clear').classList.toggle('show', q.length>0);
-  document.querySelectorAll('.proc-row').forEach(function(r){
-    r.style.display = (!q||r.dataset.search.includes(q)) ? '' : 'none';
-  });
-  // Hide empty category blocks
-  document.querySelectorAll('.cat-block').forEach(function(b){
-    const visible = Array.from(b.querySelectorAll('.proc-row')).some(r=>r.style.display!=='none');
-    b.style.display = visible ? '' : 'none';
-  });
+  const ql = (q || '').trim();
+  document.getElementById('srch-clear').classList.toggle('show', ql.length > 0);
+  _globalSearchQ = ql;
+  if (ql) renderGlobalSearch(ql);
+  else buildProcsList();
 }
 
 function clearSearch() {
